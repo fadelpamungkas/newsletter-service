@@ -1,10 +1,16 @@
 use std::net::TcpListener;
 
-use newsletter_service::run;
+use newsletter_service::{config::get_configuration, startup::run};
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
-    let listener = TcpListener::bind("127.0.0.1:9002").expect("Failed to bind address");
+    // Read configuration file
+    let config = get_configuration().expect("Failed to read configuration.");
 
+    // Create a TCP listener bound to the address we configured
+    let address = format!("127.0.0.1:{}", config.application_port);
+    let listener = TcpListener::bind(address).expect("Failed to bind address");
+
+    // Run the application
     run(listener)?.await
 }
