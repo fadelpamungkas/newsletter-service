@@ -1,7 +1,25 @@
 use std::net::TcpListener;
 
-use newsletter_service::config::{get_configuration, DatabaseSettings};
+use newsletter_service::{config, telemetry};
+use once_cell::sync::Lazy;
+use secrecy::ExposeSecret;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
+
+// Ensure that the tracing stack is only initialized once using 'once_cell'
+static TRACING: Lazy<()> = Lazy::new(|| {
+    let default_filter_level = "info".to_string();
+    let subscriber_name = "test".to_string();
+
+    if std::env::var("TEST_LOG").is_ok() {
+        let subscriber =
+            telemetry::get_subscriber(subscriber_name, default_filter_level, std::io::stdout);
+        telemetry::init_subscriber(subscriber);
+    } else {
+        let subscriber =
+            telemetry::get_subscriber(subscriber_name, default_filter_level, std::io::sink);
+        telemetry::init_subscriber(subscriber);
+    }
+});
 
 pub struct TestApp {
     pub address: String,
@@ -10,11 +28,12 @@ pub struct TestApp {
 
 // Launch our application in the background ~
 async fn spawn_app() -> TestApp {
+    Lazy::force(&TRACING);
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
     let port = listener.local_addr().unwrap().port();
     let address = format!("http://127.0.0.1:{}", port);
 
-    let mut config = get_configuration().expect("Failed to read configuration");
+    let mut config = config::get_configuration().expect("Failed to read configuration");
     config.database.name = uuid::Uuid::new_v4().to_string();
 
     let connection_pool = configure_database(&config.database).await;
@@ -31,11 +50,12 @@ async fn spawn_app() -> TestApp {
     }
 }
 
-pub async fn configure_database(config: &DatabaseSettings) -> sqlx::PgPool {
+pub async fn configure_database(config: &config::DatabaseSettings) -> sqlx::PgPool {
     // Create database
-    let mut connection = PgConnection::connect(&config.connection_string_no_database())
-        .await
-        .expect("Failed to connect to PostgreSQL");
+    let mut connection =
+        PgConnection::connect(&config.connection_string_no_database().expose_secret())
+            .await
+            .expect("Failed to connect to PostgreSQL");
 
     connection
         .execute(format!(r#"CREATE DATABASE "{}";"#, config.name).as_str())
@@ -43,7 +63,7 @@ pub async fn configure_database(config: &DatabaseSettings) -> sqlx::PgPool {
         .expect("Failed to create database");
 
     // Migrate database
-    let connection_pool = PgPool::connect(&config.connection_string())
+    let connection_pool = PgPool::connect(&config.connection_string().expose_secret())
         .await
         .expect("Failed to connect to PostgreSQL");
 

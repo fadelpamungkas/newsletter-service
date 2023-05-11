@@ -1,14 +1,19 @@
 use std::net::TcpListener;
 
-use newsletter_service::{config::get_configuration, startup::run};
+use newsletter_service::{config, startup, telemetry};
+use secrecy::ExposeSecret;
 use sqlx::PgPool;
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
-    // Read configuration file
-    let config = get_configuration().expect("Failed to read configuration.");
+    let subscriber =
+        telemetry::get_subscriber("newsletter_service".into(), "info".into(), std::io::stdout);
+    telemetry::init_subscriber(subscriber);
 
-    let connection_pool = PgPool::connect(&config.database.connection_string())
+    // Read configuration file
+    let config = config::get_configuration().expect("Failed to read configuration.");
+
+    let connection_pool = PgPool::connect(&config.database.connection_string().expose_secret())
         .await
         .expect("Failed to connect to PostgreSQL");
 
@@ -17,5 +22,5 @@ async fn main() -> Result<(), std::io::Error> {
     let listener = TcpListener::bind(address).expect("Failed to bind address");
 
     // Run the application
-    run(listener, connection_pool)?.await
+    startup::run(listener, connection_pool)?.await
 }
